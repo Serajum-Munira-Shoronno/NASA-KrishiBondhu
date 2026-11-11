@@ -6,9 +6,9 @@
 2. Fetch live NASA POWER, SMAP L4 and GPM IMERG data directly from the phone.
 3. Show retrieval time, requested period, observation counts and units.
 4. Verify the team's HTTPS backend and Earthdata/AppEEARS credentials.
-5. Submit the MODIS + ECOSTRESS point sample. Keep the app open while AppEEARS processes the task.
-6. Show MODIS MOD13Q1.061 NDVI, its QA-accepted sample count, ECOSTRESS ECO_L3T_JET ETdaily, cloud/water QA acceptance and observation dates.
-7. After all five NASA streams pass QA and the Claude backend key is active, generate the three XEOI rotation pathways plus Claude's farmer-readable crop recommendation.
+5. Submit a NEW 36-calendar-month MODIS + ECOSTRESS point sample. Keep the app open while AppEEARS processes the task.
+6. Show MODIS MOD13Q1.061 NDVI chart, its QA-accepted sample count and observation dates; then show ECOSTRESS ECO_L3T_JET ETdaily chart, cloud/water QA acceptance and irregular overpass dates. Re-fetch after the v1.3.5 backend deploy to receive the dated series.
+7. Open Advice. If MODIS is below 8 accepted observations, generate a clearly labelled Preliminary 3/5-source recommendation from POWER + SMAP + GPM plus the farmer profile. If all five streams pass the required QA/count gates, generate Full 5/5 XEOI instead. Both require a working Claude backend key.
 8. Explain the source evidence, scoring components, missing data, benefits, risks and local validation needs.
 
 ## What to claim
@@ -34,7 +34,16 @@ The AppEEARS backend must be deployed to an HTTPS host and configured with priva
 ## Update: bilingual UI, scenario slider and AI assistant
 - The app brand is NASA KrishiBondhu, and the home screen uses custom illustrated action tiles designed for lower reading burden.
 - The app is bilingual (Bangla/English toggle). Bangla is the default.
-- Full rotation advice is blocked unless POWER, SMAP, GPM, QA-screened MODIS and QA-screened ECOSTRESS data are available. No three-source or fake-data fallback is shown.
+- Preliminary advice is available from verified POWER + SMAP + GPM and farmer inputs, with an explicit 3/5-source label. Full five-source XEOI remains blocked until MODIS/ECOSTRESS QA thresholds pass. Optional sample charts/result previews are watermarked DEMO and are never used in calculations; do not present them as live evidence.
 - Claude Sonnet 5.5 generates the farmer-facing recommendation and crop sequence only when the private backend ANTHROPIC_API_KEY is configured. The XEOI multi-sensor scoring remains transparent and is not represented as a trained yield prediction model.
 - The AI chat includes all five NASA indicator summaries where available. Android speech recognition provides Bangla/English voice input; TTS playback depends on the phone having Bengali voice data installed.
 - The what-if slider is an illustrative scenario test (soil moisture assumed to move at half the rainfall change), not a forecast.
+
+
+## v1.3.5 screen-recording sequence
+
+- Start with the Farm tab and show the real farm profile/coordinate. Hide phone notifications and do not show account credentials.
+- In Satellite, fetch NASA POWER/SMAP/GPM, then submit a NEW AppEEARS sample after the v1.3.5 backend is deployed. Wait until the task returns live or partial.
+- Scroll to MODIS and ECOSTRESS. Show the QA-accepted counts, dates and separate charts. A partial result is still a valid display of the accepted observations; do not call it full coverage.
+- In Advice, use Preliminary 3/5 when MODIS or ECOSTRESS is below threshold. Narrate that MODIS/ECOSTRESS are displayed as context but are excluded from the preliminary score. Use Full 5/5 only after both QA gates pass.
+- The “Show sample charts” / “Preview example advice result” controls exist only to preview layout. If used in a design walkthrough, keep the DEMO / SAMPLE watermark visible and explicitly call them sample UI—not NASA results or a farm-specific recommendation. Do not use these samples as proof of challenge completion.

@@ -1,0 +1,13 @@
+NASA KrishiBondhu v1.3.4 — Verified Advice + MODIS QA Patch
+
+এই সংস্করণে v1.3.3 audit করে অতিরিক্ত সংশোধন:
+1. MOD13Q1 raw NDVI-এর বৈধ range (-2000 থেকে 10000) যাচাই করার পর 0.0001 scale প্রয়োগ করা হয়। -3000 fill value-কে ভুল করে -0.3 NDVI হিসেবে গ্রহণ করা হবে না।
+2. AppEEARS-এর sampling period এখন ৩৬ calendar month; ৩০ দিন × ৩৬ approximation নয়।
+3. নতুন partial AppEEARS result এলে আগের Advice cache মুছে যায়, যাতে পুরনো advice নতুন satellite status-এর সঙ্গে মিশে না থাকে।
+4. Android app versionName 1.3.4 / versionCode 5 করা হয়েছে।
+5. API integration test নিশ্চিত করে: ৭টি MODIS + ২৯টি ECOSTRESS থাকলে allowPartial=true দিয়ে ৩-source Preliminary Advice endpoint সফল হয়, আর allowPartial=false-এ Full mode 409 দিয়ে blocked থাকে।
+
+যাচাই:
+- Backend pytest: এই ZIP তৈরির সময় চালানো সব test পাস করতে হবে।
+- Backend Python compile এবং Android WebView JavaScript syntax check করা হয়েছে।
+- Live NASA AppEEARS task, Render deployment, Claude live API এবং Android APK install এই local audit-এ চালানো হয়নি; এগুলোর live credentials/runtime ছাড়া সেগুলোর সাফল্য দাবি করা হচ্ছে না।

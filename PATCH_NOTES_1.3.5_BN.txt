@@ -1,0 +1,14 @@
+NASA KrishiBondhu v1.3.5 — Satellite Charts + Honest Demo Preview
+
+1. Backend response now includes dated series for QA-accepted MODIS NDVI and ECOSTRESS ET observations. At most 120 accepted records per sensor are returned. No interpolation or synthetic records are added to live results.
+2. Satellite tab renders separate MODIS NDVI and ECOSTRESS ET trend charts with units, product, resolution, accepted/checked counts and sample dates.
+3. Optional sample-chart preview is explicitly watermarked DEMO / SAMPLE DATA. It is presentation-only and never enters ancillary state, NASA calls or recommendation scoring.
+4. Advice tab includes an optional example-result layout, clearly labelled as not live advice and not farm-specific. It does not replace the real Preliminary Advice API request.
+5. Existing preliminary vs full-XEOI separation and MODIS QA rules remain unchanged.
+6. Android versionName 1.3.5 / versionCode 6.
+
+Validation:
+- Backend unit suite includes a new check that plotted series contain only quality-accepted observations.
+- Android HTML/JavaScript syntax checked with Node.
+- Backend compile and tests run locally.
+- Live Render, NASA AppEEARS, Claude credentials, physical Android APK/device build have not been tested in this environment.

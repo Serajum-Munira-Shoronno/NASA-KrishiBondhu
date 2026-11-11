@@ -15,19 +15,19 @@ PRODUCTS = {
 
 def test_app_eears_csv_requires_and_applies_quality_layers():
     modis_csv = """Date,MOD13Q1.061_NDVI,MOD13Q1.061_DetailedQA
-2024-01-01,5000,0
-2024-01-17,5500,4
-2024-02-02,6000,8
-2024-02-18,6200,0
-2024-03-05,6500,0
-2024-03-21,6600,0
-2024-04-06,6700,0
-2024-04-22,6800,0
-2024-05-08,6900,0
-2024-05-24,7000,0
-2024-06-09,7100,0
-2024-06-25,7200,0
-2024-07-11,7300,0
+2024-01-01,5000,2048
+2024-01-17,5500,2052
+2024-02-02,6000,2056
+2024-02-18,6200,2048
+2024-03-05,6500,2048
+2024-03-21,6600,2048
+2024-04-06,6700,2048
+2024-04-22,6800,2048
+2024-05-08,6900,2048
+2024-05-24,7000,2048
+2024-06-09,7100,2048
+2024-06-25,7200,2048
+2024-07-11,7300,2048
 """
     eco_csv = """Date,ECO_L3T_JET.002_ETdaily,ECO_L3T_JET.002_ETuncertainty,ECO_L3T_JET.002_cloud,ECO_L3T_JET.002_water
 2024-01-05,2.0,0.2,0,0
@@ -38,7 +38,7 @@ def test_app_eears_csv_requires_and_applies_quality_layers():
 """
     result = _summarize_csv([modis_csv, eco_csv], PRODUCTS)
     assert result["status"] == "live"
-    # DetailedQA value 8 has usefulness class 2 and is rejected.
+    # DetailedQA value 2056 has usefulness class 2 and is rejected.
     assert result["modis"]["observationCount"] == 12
     assert result["modis"]["qualityColumnAvailable"] is True
     # The cloudy ECOSTRESS observation is rejected.
@@ -46,6 +46,59 @@ def test_app_eears_csv_requires_and_applies_quality_layers():
     assert result["ecostress"]["cloudMaskAvailable"] is True
     assert result["ecostress"]["waterMaskAvailable"] is True
 
+
+def test_modis_marginal_pixels_are_only_accepted_when_detailedqa_confirms_quality():
+    modis_csv = """Date,MOD13Q1.061_NDVI,MOD13Q1.061_pixel_reliability,MOD13Q1.061_DetailedQA
+2024-01-01,5000,1,2053
+2024-01-17,5100,1,2053
+2024-02-02,5200,1,2053
+2024-02-18,5300,1,2053
+2024-03-05,5400,1,2053
+2024-03-21,5500,1,2053
+2024-04-06,5600,1,2053
+2024-04-22,5700,1,2053
+2024-05-08,5800,1,2309
+2024-05-24,5900,2,2053
+2024-06-09,6000,3,2053
+"""
+    eco_csv = """Date,ECO_L3T_JET.002_ETdaily,ECO_L3T_JET.002_cloud,ECO_L3T_JET.002_water
+2024-01-05,2.0,0,0
+2024-02-03,2.2,0,0
+2024-03-04,1.9,0,0
+2024-04-02,1.7,0,0
+"""
+    result = _summarize_csv([modis_csv, eco_csv], PRODUCTS)
+    assert result["modis"]["qualityObservationsSeen"] == 11
+    assert result["modis"]["qualityObservationsAccepted"] == 8
+    assert result["modis"]["marginalAcceptedWithDetailedQA"] == 8
+    assert result["modis"]["marginalRejectedByDetailedQA"] == 1
+    assert result["modis"]["observationCount"] == 8
+
+
+
+def test_sensor_summaries_return_only_quality_accepted_observation_series():
+    modis_csv = """Date,MOD13Q1.061_NDVI,MOD13Q1.061_pixel_reliability,MOD13Q1.061_DetailedQA
+2025-01-01,5000,0,2048
+2025-01-17,5500,1,2053
+2025-02-02,6000,2,2048
+2025-02-18,-3000,0,2048
+"""
+    eco_csv = """Date,ECO_L3T_JET.002_ETdaily,ECO_L3T_JET.002_cloud,ECO_L3T_JET.002_water
+2025-01-05,2.0,0,0
+2025-02-03,2.2,0,0
+2025-03-04,1.9,1,0
+"""
+    result = _summarize_csv([modis_csv, eco_csv], PRODUCTS)
+    # MODIS keeps only reliability=0 and DetailedQA-screened reliability=1 rows.
+    assert result["modis"]["series"] == [
+        {"date": "2025-01-01", "value": 0.5},
+        {"date": "2025-01-17", "value": 0.55},
+    ]
+    # Cloud-flagged ECOSTRESS data is excluded from the visible plot.
+    assert result["ecostress"]["series"] == [
+        {"date": "2025-01-05", "value": 2.0},
+        {"date": "2025-02-03", "value": 2.2},
+    ]
 
 def test_app_eears_csv_without_qa_is_not_live():
     modis_csv = """Date,MOD13Q1.061_NDVI
@@ -138,7 +191,7 @@ def test_app_eears_catalogue_is_paginated_and_required_layers_are_resolved(monke
         if path == "product" and params["offset"] == 500:
             return second_page
         if path == "product/MOD13Q1.061":
-            return {"250m_16_days_NDVI": {}, "250m_16_days_DetailedQA": {}}
+            return {"250m_16_days_NDVI": {}, "250m_16_days_pixel_reliability": {}, "250m_16_days_DetailedQA": {}}
         if path == "product/ECO_L3T_JET.003":
             return {"ETdaily": {}, "ETuncertainty": {}, "cloud": {}, "water": {}}
         raise AssertionError(f"Unexpected AppEEARS API path: {path}")
@@ -147,7 +200,11 @@ def test_app_eears_catalogue_is_paginated_and_required_layers_are_resolved(monke
     products = main._resolve_products("test-token")
     assert products["modisProduct"] == "MOD13Q1.061"
     assert products["ecostressProduct"] == "ECO_L3T_JET.003"
-    assert products["modisQualityLayer"] == "250m_16_days_DetailedQA"
+    assert products["modisQualityLayer"] == "250m_16_days_pixel_reliability"
+    assert products["modisDetailedQaLayer"] == "250m_16_days_DetailedQA"
+    assert {x["layer"] for x in products["requestLayers"] if x["product"] == "MOD13Q1.061"} == {
+        "250m_16_days_NDVI", "250m_16_days_pixel_reliability", "250m_16_days_DetailedQA"
+    }
     assert products["ecostressEtLayer"] == "ETdaily"
     assert any(path == "product" and params["offset"] == 500 for path, params in calls)
 
@@ -396,3 +453,70 @@ def test_claude_guidance_prompt_discloses_preliminary_sources(monkeypatch):
     output = _generate_ai_rotation_guidance(request, result)
     assert output["recommendedPathwayId"] == chosen["id"]
     assert "PRELIMINARY THREE-SOURCE" in calls["json"]["system"]
+
+
+def test_modis_fill_dn_is_not_scaled_into_a_plausible_ndvi_value():
+    modis_csv = """Date,MOD13Q1.061_NDVI,MOD13Q1.061_pixel_reliability,MOD13Q1.061_DetailedQA
+2024-01-01,-3000,0,2048
+2024-01-17,5000,0,2048
+"""
+    eco_csv = """Date,ECO_L3T_JET.002_ETdaily,ECO_L3T_JET.002_cloud,ECO_L3T_JET.002_water
+2024-01-05,2.0,0,0
+2024-02-03,2.2,0,0
+2024-03-04,1.9,0,0
+2024-04-02,1.7,0,0
+"""
+    result = _summarize_csv([modis_csv, eco_csv], PRODUCTS)
+    assert result["modis"]["qualityObservationsSeen"] == 1
+    assert result["modis"]["qualityObservationsAccepted"] == 1
+    assert result["modis"]["mean"] == 0.5
+
+
+def test_appeears_sampling_months_are_calendar_months_not_30_day_approximations():
+    from datetime import date
+    from main import _subtract_calendar_months
+
+    assert _subtract_calendar_months(date(2026, 11, 2), 36) == date(2023, 11, 2)
+    assert _subtract_calendar_months(date(2024, 3, 31), 1) == date(2024, 2, 29)
+
+
+def test_decision_api_returns_preliminary_with_seven_modis_and_blocks_full_mode(monkeypatch):
+    from fastapi.testclient import TestClient
+    import main
+
+    monkeypatch.setattr(main, "_chat_rate_ok", lambda client: True)
+    monkeypatch.setattr(main, "_generate_ai_rotation_guidance", lambda request, result: {
+        "heading": "প্রাথমিক পরামর্শ",
+        "recommendedPathwayId": next(x["id"] for x in result["strategies"] if x.get("candidateCrop")),
+        "recommendedCrop": next(x["candidateCrop"]["cropBn"] for x in result["strategies"] if x.get("candidateCrop")),
+        "sequence": ["ধান", "মসুর ডাল"],
+        "why": "পরীক্ষামূলক API response",
+        "nextSteps": ["মৌসুম যাচাই", "জাত যাচাই", "মাটি যাচাই"],
+        "cautions": ["এটি প্রাথমিক", "স্থানীয়ভাবে যাচাই করুন"],
+        "validationNote": "পূর্ণাঙ্গ পাঁচ উৎসের ফল নয়।",
+    })
+    body = {
+        "farm": {"name": "Demo Farm", "location": "Gazipur, Bangladesh", "currentCrop": "Rice",
+                 "soilType": "Sandy Loam", "water": "Limited", "priority": "Save water", "plantingMonth": "11"},
+        "nasa": {"status": "live", "temperatureMeanC": 28.5, "rainfallChangePct": -18,
+                 "smapRootZoneAnomalyPct": -12,
+                 "observationCounts": {"powerDailyT2M": 1500, "smapRootZoneDaily": 1500, "gpmImergDaily": 600}},
+        "ancillary": {"status": "partial",
+                      "modis": {"status": "live", "observationCount": 7, "qualityObservationsAccepted": 7,
+                                "qualityObservationsSeen": 46, "qualityColumnAvailable": True, "trendChangePct": -4},
+                      "ecostress": {"status": "live", "observationCount": 29, "qualityObservationsAccepted": 29,
+                                    "qualityObservationsSeen": 29, "cloudMaskAvailable": True,
+                                    "waterMaskAvailable": True, "trendChangePct": -7.37}},
+        "lang": "bn", "allowPartial": True,
+    }
+    client = TestClient(main.app)
+    partial = client.post("/api/decision/rotation", json=body)
+    assert partial.status_code == 200, partial.text
+    assert partial.json()["decisionModeCode"] == "preliminary_three_source"
+    assert partial.json()["sourcesUsed"] == 3
+    assert all("MODIS" not in row["source"] and "ECOSTRESS" not in row["source"] for row in partial.json()["evidence"])
+
+    body["allowPartial"] = False
+    full = client.post("/api/decision/rotation", json=body)
+    assert full.status_code == 409
+    assert "MODIS" in full.text

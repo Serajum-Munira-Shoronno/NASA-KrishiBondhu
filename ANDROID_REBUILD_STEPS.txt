@@ -19,6 +19,9 @@ After install:
 - Press Verify team backend & NASA access.
 - Fetch POWER/SMAP/GPM directly from NASA.
 - Fetch MODIS + ECOSTRESS via AppEEARS backend.
-- Generate the XEOI rotation plan only when all five data sources and QA checks pass.
+- When POWER + SMAP + GPM are live, use “প্রাথমিক পরামর্শ তৈরি করুন” if MODIS/ECOSTRESS are still partial; this is explicitly 3/5 and excludes MODIS/ECOSTRESS from the score.
+- Use “পূর্ণাঙ্গ NASA পরামর্শ” only when all five sources and MODIS/ECOSTRESS QA thresholds pass.
+- The satellite tab renders actual MODIS NDVI and ECOSTRESS ET charts only from date/value arrays returned by the updated backend. After deploying the new backend, fetch a NEW AppEEARS point task to populate the charts.
+- Optional “Show sample charts” and “Preview example advice result” are DEMO-only visual previews with visible labels. They are not live, not farm-specific, and never used in recommendation calculations.
 
 The source project has not been compiled into an APK in this environment because Android SDK/Android Studio are not installed here. Compile in your local Android Studio and test on the phone.

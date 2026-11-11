@@ -53,11 +53,11 @@ On Windows, copy `.env.example` to `.env` in `backend/`, edit that local file wi
 
 - Earthdata Login produces an AppEEARS Bearer token on the backend.
 - The backend paginates the AppEEARS product catalogue and reads live per-product layer metadata.
-- It prefers MODIS `MOD13Q1.061` NDVI and DetailedQA/available quality layer.
+- It requests MODIS `MOD13Q1.061` NDVI, pixel reliability/SummaryQA, and DetailedQA together when available. Marginal summary pixels are accepted only when DetailedQA confirms usable VI and a clear land pixel.
 - It prefers ECOSTRESS `ECO_L3T_JET.003`, or `.002` only when that is the available catalogue product, and requests ETdaily/cloud/water/uncertainty layers when present.
 - The point-sample task is submitted and polled; CSV bundle results are downloaded after task completion.
-- MODIS NDVI scaling and DetailedQA bit fields are processed. ECOSTRESS cloud/water flagged pixels are excluded.
-- Advanced result status is `live` only with at least 8 QA-accepted MODIS observations and 4 QA-accepted ECOSTRESS overpasses plus all required quality fields. Otherwise it is `partial` and XEOI is blocked.
+- MODIS NDVI scaling and DetailedQA bit fields are processed. Summary QA class 1 is conditionally accepted only after DetailedQA screening; class 2/3 and invalid values are rejected. ECOSTRESS cloud/water flagged pixels are excluded.
+- Advanced result status is `live` only with at least 8 QA-accepted MODIS observations and 4 QA-accepted ECOSTRESS overpasses plus all required quality fields. Otherwise it is `partial`. Full five-source XEOI remains locked, while Android can request a clearly labelled preliminary three-source result using POWER, SMAP and GPM.
 
 ## Security and operational notes
 

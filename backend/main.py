@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import calendar
 import csv
 import io
 import math
@@ -244,14 +245,15 @@ def _resolve_products(token: str) -> Dict[str, Any]:
     eco_layers = _layer_map(ecostress_id, token)
 
     ndvi = _choose_layer(modis_layers, ["ndvi"], ["evi"])
-    # Prefer the simple pixel-reliability/SummaryQA classes. DetailedQA is a bit field
-    # and is decoded separately below; it must never be treated as a direct 0/1 flag.
-    reliability = (
+    # Request the summary pixel-reliability layer AND DetailedQA when both exist.
+    # SummaryQA class 1 is only accepted after DetailedQA confirms a usable land pixel.
+    pixel_reliability = (
         _choose_layer(modis_layers, ["pixel", "reliability"])
         or _choose_layer(modis_layers, ["reliability"])
         or _choose_layer(modis_layers, ["summaryqa"])
-        or _choose_layer(modis_layers, ["detailedqa"])
     )
+    detailed_qa = _choose_layer(modis_layers, ["detailedqa"])
+    reliability = pixel_reliability or detailed_qa
     et_daily = _choose_layer(ecostress_layers := eco_layers, ["etdaily"])
     et_uncertainty = _choose_layer(ecostress_layers, ["etuncertainty"])
     cloud = _choose_layer(ecostress_layers, ["cloud"])
@@ -272,6 +274,8 @@ def _resolve_products(token: str) -> Dict[str, Any]:
     ]
     if reliability:
         selected.append({"product": modis_id, "layer": reliability})
+    if detailed_qa and detailed_qa != reliability:
+        selected.append({"product": modis_id, "layer": detailed_qa})
     if et_uncertainty:
         selected.append({"product": ecostress_id, "layer": et_uncertainty})
     if cloud:
@@ -283,6 +287,8 @@ def _resolve_products(token: str) -> Dict[str, Any]:
         "modisProduct": modis_id,
         "modisNdviLayer": ndvi,
         "modisQualityLayer": reliability,
+        "modisPixelReliabilityLayer": pixel_reliability,
+        "modisDetailedQaLayer": detailed_qa,
         "ecostressProduct": ecostress_id,
         "ecostressEtLayer": et_daily,
         "ecostressUncertaintyLayer": et_uncertainty,
@@ -290,6 +296,29 @@ def _resolve_products(token: str) -> Dict[str, Any]:
         "ecostressWaterLayer": water,
         "requestLayers": selected,
     }
+
+
+def _subtract_calendar_months(day: date, months: int) -> date:
+    """Subtract exact calendar months, clamping to the destination month's last day."""
+    month_index = day.year * 12 + (day.month - 1) - months
+    year, month_zero = divmod(month_index, 12)
+    month = month_zero + 1
+    return date(year, month, min(day.day, calendar.monthrange(year, month)[1]))
+
+
+def _scale_modis_ndvi(value: Optional[float]) -> Optional[float]:
+    """Validate MOD13Q1 NDVI raw/scaled range and apply its 0.0001 scale once."""
+    if value is None:
+        return None
+    if abs(value) > 1.5:
+        # MOD13Q1 raw NDVI valid range is -2000..10000; -3000 and other fill
+        # codes must not become plausible NDVI values after scaling.
+        if not (-2000 <= value <= 10000) or abs(value - round(value)) > 1e-6:
+            return None
+        scaled = value * 0.0001
+    else:
+        scaled = value
+    return scaled if -0.2 <= scaled <= 1.0 else None
 
 
 def _parse_float(value: Any) -> Optional[float]:
@@ -325,11 +354,45 @@ def _trend_percent(values: List[float]) -> Optional[float]:
     return ((second - first) / abs(first)) * 100.0
 
 
+def _detailed_qa_is_acceptable(value: Optional[float]) -> bool:
+    """Accept MOD13Q1 DetailedQA only when it indicates a usable land pixel.
+
+    Bits 0-1: MODLAND quality (0=good, 1=check other QA); bits 2-5:
+    VI usefulness (0/1 are highest/lower quality). Reject adjacency cloud,
+    mixed cloud, non-land, snow/ice and shadow flags for farm-point screening.
+    """
+    if value is None:
+        return False
+    if abs(value - round(value)) > 1e-6:
+        return False
+    q = int(value)
+    if q < 0 or q > 65535:
+        return False
+    modland_qa = q & 0b11
+    usefulness = (q >> 2) & 0b1111
+    adjacent_cloud = (q >> 8) & 1
+    mixed_cloud = (q >> 10) & 1
+    land_water = (q >> 11) & 0b111
+    snow_ice = (q >> 14) & 1
+    shadow = (q >> 15) & 1
+    return (
+        modland_qa in (0, 1)
+        and usefulness <= 1
+        and adjacent_cloud == 0
+        and mixed_cloud == 0
+        and land_water == 1
+        and snow_ice == 0
+        and shadow == 0
+    )
+
+
 def _summarize_csv(csv_texts: List[str], products: Dict[str, Any]) -> Dict[str, Any]:
     modis_values: List[Tuple[str, float]] = []
     eco_values: List[Tuple[str, float, Optional[float]]] = []
     modis_quality_seen = 0
     modis_quality_good = 0
+    modis_marginal_accepted = 0
+    modis_detailedqa_rejected = 0
     eco_quality_seen = 0
     eco_quality_good = 0
     modis_quality_column_found = False
@@ -343,41 +406,54 @@ def _summarize_csv(csv_texts: List[str], products: Dict[str, Any]) -> Dict[str, 
                 continue
             headers = [str(x or "") for x in reader.fieldnames]
             ndvi_col = _find_column(headers, ["ndvi"], ["evi"])
-            reliability_col = (_find_column(headers, ["pixel", "reliability"]) or _find_column(headers, ["reliability"]) or _find_column(headers, ["summaryqa"]) or _find_column(headers, ["detailedqa"]))
+            reliability_col = (_find_column(headers, ["pixel", "reliability"]) or _find_column(headers, ["reliability"]) or _find_column(headers, ["summaryqa"]))
+            detailedqa_col = _find_column(headers, ["detailedqa"])
+            # When DetailedQA is the only quality layer, use it as the primary QA field.
+            if reliability_col is None:
+                reliability_col = detailedqa_col
             et_col = _find_column(headers, ["etdaily"])
             uncertainty_col = _find_column(headers, ["etuncertainty"])
             cloud_col = _find_column(headers, ["cloud"])
             water_col = _find_column(headers, ["water"])
-            modis_quality_column_found = modis_quality_column_found or bool(reliability_col)
+            modis_quality_column_found = modis_quality_column_found or bool(reliability_col or detailedqa_col)
             eco_cloud_column_found = eco_cloud_column_found or bool(cloud_col)
             eco_water_column_found = eco_water_column_found or bool(water_col)
             date_col = _find_column(headers, ["date"]) or _find_column(headers, ["time"])
             for row in reader:
                 date_value = str(row.get(date_col, "") if date_col else "")
                 if ndvi_col:
-                    value = _parse_float(row.get(ndvi_col))
+                    raw_value = _parse_float(row.get(ndvi_col))
+                    value = _scale_modis_ndvi(raw_value)
                     if value is not None:
                         modis_quality_seen += 1
                         quality = _parse_float(row.get(reliability_col)) if reliability_col else None
-                        # MOD13Q1 quality semantics depend on the selected layer:
-                        # pixel_reliability / SummaryQA: 0=good, 1=marginal, 2=snow/ice, 3=cloudy.
-                        # DetailedQA: bits 0-1 are MODLAND QA; bits 2-5 are VI usefulness.
-                        if not reliability_col or quality is None:
+                        if not reliability_col or quality is None or abs(quality - round(quality)) > 1e-6:
                             continue
                         qname = reliability_col.lower()
                         q = int(quality)
+                        detailed_value = _parse_float(row.get(detailedqa_col)) if detailedqa_col else None
+                        accepted = False
+                        marginal_accepted_candidate = False
                         if "detailedqa" in qname:
-                            modland_qa = q & 0b11
-                            usefulness = (q >> 2) & 0b1111
-                            if modland_qa != 0 or usefulness > 1:
-                                continue
-                        elif q != 0:
+                            accepted = _detailed_qa_is_acceptable(quality)
+                        elif q == 0:
+                            # Summary/pixel reliability 0 means good data.
+                            accepted = True
+                        elif q == 1 and detailedqa_col and detailed_value is not None:
+                            # Marginal summary pixels are rescued only when DetailedQA
+                            # independently confirms good usefulness and clear land.
+                            accepted = _detailed_qa_is_acceptable(detailed_value)
+                            marginal_accepted_candidate = accepted
+                            if not accepted:
+                                modis_detailedqa_rejected += 1
+                        # Classes 2/3 and all unverified marginal/invalid pixels are rejected.
+                        if not accepted:
                             continue
-                        modis_quality_good += 1
-                        # MOD13Q1 NDVI uses a 0.0001 scale factor when raw integer DN values are returned.
-                        if abs(value) > 1.5:
-                            value *= 0.0001
-                        if -1.0 <= value <= 1.0:
+                        # value is already range-checked and scaled by _scale_modis_ndvi.
+                        if -0.2 <= value <= 1.0:
+                            modis_quality_good += 1
+                            if marginal_accepted_candidate:
+                                modis_marginal_accepted += 1
                             modis_values.append((date_value, value))
                 if et_col:
                     value = _parse_float(row.get(et_col))
@@ -412,6 +488,9 @@ def _summarize_csv(csv_texts: List[str], products: Dict[str, Any]) -> Dict[str, 
             "median": round(statistics.median(vals), 5) if vals else None,
             "trendChangePct": round(_trend_percent(vals), 2) if _trend_percent(vals) is not None else None,
             "unit": unit,
+            # Return only QA-accepted observation dates/values for honest client-side plots.
+            # The Android UI never interpolates missing days or fabricates points.
+            "series": [{"date": str(d), "value": round(float(v), 5)} for d, v in pairs[-120:]],
         }
 
     ndvi = metric_summary(modis_values, "unitless NDVI")
@@ -425,8 +504,11 @@ def _summarize_csv(csv_texts: List[str], products: Dict[str, Any]) -> Dict[str, 
             "product": products["modisProduct"],
             "layer": products["modisNdviLayer"],
             "qualityLayer": products["modisQualityLayer"],
+            "detailedQaLayer": products.get("modisDetailedQaLayer"),
             "qualityObservationsSeen": modis_quality_seen,
             "qualityObservationsAccepted": modis_quality_good,
+            "marginalAcceptedWithDetailedQA": modis_marginal_accepted,
+            "marginalRejectedByDetailedQA": modis_detailedqa_rejected,
             "qualityColumnAvailable": modis_quality_column_found,
             "spatialResolutionM": 250,
             "temporalResolutionDays": 16,
@@ -452,7 +534,7 @@ def _summarize_csv(csv_texts: List[str], products: Dict[str, Any]) -> Dict[str, 
             "NASA/JPL/LP DAAC ECOSTRESS L3 JET (ETdaily; 70 m; irregular overpass observations)",
         ],
         "qualityNotes": [
-            "MODIS NDVI applies the documented 0.0001 scale factor when raw integer values are supplied; only pixel-reliability class 0 is accepted when the quality layer is available.",
+            "MODIS NDVI raw values are range-checked against -2000..10000 before applying the documented 0.0001 scale factor; fill values are excluded. Pixel-reliability class 0 is accepted; class 1 is accepted only when DetailedQA confirms VI usefulness 0/1, a land pixel, and no adjacent cloud, mixed cloud, snow/ice or shadow. Classes 2/3 and unverified marginal pixels are rejected.",
             "ECOSTRESS ETdaily is reported in mm/day for the daytime-integrated observation; cloudy and water pixels are excluded when those masks are included in the AppEEARS response.",
             "ECOSTRESS has irregular ISS overpasses and data gaps. A missing overpass is not interpreted as zero evapotranspiration.",
             "The advanced sample is marked live only if MODIS quality and ECOSTRESS cloud and water quality columns are present and non-zero valid observations remain after screening.",
@@ -513,6 +595,8 @@ def verify_appeears_configuration() -> Dict[str, Any]:
             "product": products["modisProduct"],
             "ndviLayer": products["modisNdviLayer"],
             "qualityLayer": products["modisQualityLayer"],
+            "pixelReliabilityLayer": products.get("modisPixelReliabilityLayer"),
+            "detailedQaLayer": products.get("modisDetailedQaLayer"),
         },
         "ecostress": {
             "product": products["ecostressProduct"],
@@ -531,7 +615,7 @@ def submit_appeears_point(request: PointSampleRequest) -> Dict[str, Any]:
     products = _resolve_products(token)
     today = date.today()
     end_date = today - timedelta(days=10)  # allow recent composites to complete
-    start_date = end_date - timedelta(days=30 * request.months)
+    start_date = _subtract_calendar_months(end_date, request.months)
     task_name = f"KrishiBondhu-{uuid.uuid4().hex[:10]}"
     task_payload = {
         "task_type": "point",
