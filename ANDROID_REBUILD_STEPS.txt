@@ -1,0 +1,24 @@
+NASA KRISHIBONDHU — ANDROID BUILD (WINDOWS)
+===========================================
+
+IMPORTANT: This updated project includes the MODIS + ECOSTRESS AppEEARS bridge, a backend-verification button, and the XEOI backend call. You must rebuild/reinstall this source; the older APK on the phone does not contain these changes.
+
+1. Extract the full project ZIP.
+2. Android Studio -> File -> Open -> choose the KrishiBondhuAndroid folder (the folder with settings.gradle.kts).
+3. Wait for Gradle Sync. If Android Studio prompts to install SDK Platform 35 or Build Tools 35.0.0, allow it.
+4. Connect the Android phone with USB debugging enabled and authorized.
+5. Choose the phone from the device list, then click Run (green triangle).
+6. If Android Studio says the app is already installed, allow it to update. Keep the same package ID and debug key; do not uninstall first unless Android reports a signing conflict.
+7. For a shareable test APK: Build -> Build Bundle(s) / APK(s) -> Build APK(s).
+8. APK path: KrishiBondhuAndroid/app/build/outputs/apk/debug/app-debug.apk
+
+After install:
+- My Farm now includes a selected planting month, drainage and salinity fields; N/P/K fields have fixed units shown beside the label.
+- Advice includes the 14-entry Bangladesh crop-calendar screening catalogue and unit-checked soil-test flags.
+- Set the deployed HTTPS backend URL under Settings (⚙).
+- Press Verify team backend & NASA access.
+- Fetch POWER/SMAP/GPM directly from NASA.
+- Fetch MODIS + ECOSTRESS via AppEEARS backend.
+- Generate the XEOI rotation plan only when all five data sources and QA checks pass.
+
+The source project has not been compiled into an APK in this environment because Android SDK/Android Studio are not installed here. Compile in your local Android Studio and test on the phone.

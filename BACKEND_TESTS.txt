@@ -1,0 +1,12 @@
+Backend automated tests
+=======================
+
+From the backend folder, run:
+
+  py -m pip install -r requirements.txt
+  py -m pip install pytest
+  py -m pytest -q tests
+
+The tests cover CSV QA parsing, no-QA rejection, AppEEARS catalogue pagination/layer discovery, XEOI five-source gating, live-label/non-zero-observation checks and three-strategy generation with test fixtures.
+
+They do not contact NASA or prove any user's Earthdata credentials, AppEEARS permissions, farm coordinate or deployed backend live data. Verify those using /api/nasa/appeears/verify and an actual Android sample task.

@@ -1,0 +1,18 @@
+NASA KRISHIBONDHU ANDROID - QUICK BUILD
+
+1) Install Android Studio stable from https://developer.android.com/studio
+2) During setup, install Android SDK Platform 35 and Android SDK Build-Tools 35.x.
+3) Extract this project ZIP.
+4) Android Studio > Open > select the KrishiBondhuAndroid folder (not app/).
+5) Wait for Gradle Sync. Accept prompts to download Gradle/SDK components.
+6) To install directly on a phone: enable Developer options and USB debugging, connect by USB, accept the phone's authorization prompt, choose the device in Android Studio, and click Run.
+7) To create an APK: Build > Build Bundle(s) / APK(s) > Build APK(s).
+8) The APK is at app/build/outputs/apk/debug/app-debug.apk.
+9) Transfer that APK to the phone and install it. Chrome is not needed to launch or use NASA KrishiBondhu.
+
+Command-line build (after Android SDK and JDK 17 are installed):
+  .\gradlew.bat assembleDebug
+
+The first build downloads Gradle 8.11.1 and Android Gradle Plugin dependencies, so internet is needed on the PC for the initial build. The phone also needs internet to fetch live NASA observations.
+
+This delivery is the Android Studio project source; it is not a prebuilt APK. The execution container used to prepare it does not include the Android SDK/build tools, so no APK binary has been generated here.

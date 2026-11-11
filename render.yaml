@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: krishibondhu-earth-observation-api
+    runtime: docker
+    plan: starter
+    rootDir: backend
+    healthCheckPath: /health
+    disk:
+      name: krishibondhu-persistent-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NASA_EARTHDATA_USERNAME
+        sync: false
+      - key: NASA_EARTHDATA_PASSWORD
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: CHAT_MODEL
+        value: claude-sonnet-5-5
+      - key: NEXUS_DB_PATH
+        value: /var/data/krishibondhu_tasks.sqlite3

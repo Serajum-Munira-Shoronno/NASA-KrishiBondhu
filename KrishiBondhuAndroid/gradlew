@@ -1,0 +1,13 @@
+#!/usr/bin/env sh
+set -eu
+VERSION=8.11.1
+BASE="${GRADLE_USER_HOME:-$HOME/.gradle}/nexus-wrapper"
+DIST="$BASE/gradle-$VERSION"
+ZIP="$BASE/gradle-$VERSION-bin.zip"
+if [ ! -x "$DIST/bin/gradle" ]; then
+  mkdir -p "$BASE"
+  echo "Downloading Gradle $VERSION on first run..."
+  curl -L "https://services.gradle.org/distributions/gradle-$VERSION-bin.zip" -o "$ZIP"
+  unzip -q -o "$ZIP" -d "$BASE"
+fi
+exec "$DIST/bin/gradle" -p "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)" "$@"
