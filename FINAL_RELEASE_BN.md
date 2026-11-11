@@ -31,6 +31,7 @@
 ## XEOI-এর সীমা ও সততা
 
 - NASA POWER, SMAP, GPM, MODIS ও ECOSTRESS—পাঁচটি উৎসে non-zero usable observation, MODIS quality layer-এ অন্তত ৮টি accepted observation এবং ECOSTRESS cloud/water mask-সহ অন্তত ৪টি accepted ET observation না এলে full plan তৈরি হবে না।
+- Release 1.3.2-এ প্রাথমিক পরামর্শের আলাদা mode যোগ হয়েছে: পাঁচ-source gate পূরণ না হলে কেবল real POWER + SMAP + GPM observation, farmer input এবং crop calendar দিয়ে preliminary screen তৈরি হয়। এতে MODIS/ECOSTRESS scoring-এ ব্যবহৃত হয় না; ফলাফলে 3/5 source coverage ও preliminary limitation স্পষ্ট দেখানো হয়।
 - MODIS NDVI vegetation greenness দেখায়; crop identity/রোগ নির্ণয় করে না।
 - ECOSTRESS ET অনিয়মিত satellite overpass estimate; প্রতিদিনের মাঠ-পরিমাপ নয়। ET একা drought প্রমাণ করে না—rainfall/SMAP water deficit ও MODIS greenness decline একসঙ্গে থাকলে তবেই যৌথ signal হিসেবে ব্যবহৃত হয়।
 - Satellite pixels/grids পুরো ছোট জমির একক field measurement নয়।

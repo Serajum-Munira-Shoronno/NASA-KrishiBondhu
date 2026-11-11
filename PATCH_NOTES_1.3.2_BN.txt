@@ -1,0 +1,24 @@
+NASA KrishiBondhu v1.3.2 — Advice Generation Fix
+
+সমস্যা:
+- AppEEARS status `partial` হলে Advice tab-এর Generate button disable থাকত।
+- Backend /api/decision/rotation-ও সবসময় ৫টি NASA stream-এর পূর্ণ QA threshold চাইত; তাই MODIS-এর accepted count ৮-এর কম হলে advice তৈরি করা যেত না।
+
+সমাধান:
+1. POWER + SMAP + GPM real observations থাকলে আলাদা `preliminary_three_source` mode থেকে ৩টি rotation pathway তৈরি করা যাবে।
+2. MODIS/ECOSTRESS threshold পূরণ না হলে এই sensor দুটিকে score বা evidence-used list-এ ব্যবহার করা হবে না।
+3. UI-তে Preliminary advice (3 NASA sources) label, pending MODIS/ECOSTRESS count এবং warning দেখানো হবে।
+4. Full five-source mode আগের QA requirements অপরিবর্তিত রাখে: MODIS >= 8, ECOSTRESS >= 4, required QA layers এবং usable trends।
+5. Claude guidance দুটো mode-এই backend থেকে তৈরি হবে; Render-এ ANTHROPIC_API_KEY আবশ্যক।
+6. Android native bridge `allowPartial` flag backend-এ পাঠায়।
+
+গুরুত্বপূর্ণ:
+- Preliminary result সম্পূর্ণ ৫-source XEOI নয় এবং final planting prescription নয়।
+- No synthetic satellite values are added.
+- Farmer-এর actual soil-test values না থাকলে blank রাখুন; sample field ও approximate coordinates কেবল demonstration/test-এর জন্য।
+
+পরীক্ষা:
+- Backend automated tests: 17 passed.
+- Python compile check passed.
+- Embedded Android JavaScript syntax check passed (Node.js).
+- Android Studio/Gradle APK build ও live Render deployment এখনও আলাদাভাবে user environment-এ করতে হবে।

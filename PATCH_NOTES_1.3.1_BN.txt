@@ -1,0 +1,10 @@
+NASA KrishiBondhu 1.3.1 — Partial Data UI Fix
+
+সমাধান:
+1. AppEEARS-এর partial response-এ valid MODIS/ECOSTRESS observation থাকলেও আগের UI ভুলভাবে “No MODIS or ECOSTRESS data accepted yet” দেখাত। এখন আংশিক ফলাফল, mean NDVI/ET এবং accepted/required/checked count দেখাবে।
+2. English Settings verification toast-এর missing set_ai_ready / set_ai_missing translation যোগ করা হয়েছে।
+3. UI footer এবং Android app version 1.3.1 করা হয়েছে (versionCode 5)।
+
+Backend/API logic পরিবর্তন করা হয়নি। NASA quality threshold অপরিবর্তিত: MODIS >= 8 এবং ECOSTRESS >= 4। MODIS threshold পূরণ না হলে XEOI recommendation এখনও blocked থাকবে।
+
+Build: Android Studio-তে KrishiBondhuAndroid folder খুলুন, Gradle Sync করুন, তারপর Run অথবা Build > Build Bundle(s) / APK(s) > Build APK(s)। একই signing key থাকলে পুরোনো অ্যাপের উপর update install করুন।

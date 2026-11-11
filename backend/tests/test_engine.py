@@ -105,7 +105,7 @@ def test_xeoi_blocks_missing_advanced_nasa_source():
         {"status": "partial", "modis": {"observationCount": 3}, "ecostress": {"observationCount": 0}},
     )
     assert result["status"] == "blocked"
-    assert "ECOSTRESS ET" in result["missingSources"]
+    assert any("ECOSTRESS" in item for item in result["missingSources"])
 
 
 def test_xeoi_blocks_live_labels_with_zero_observations():
@@ -303,3 +303,96 @@ def test_candidate_catalogue_contains_crop_characteristics_and_sources():
     assert len(CROP_DATABASE) >= 12
     assert all(required.issubset(set(row)) for row in CROP_DATABASE)
     assert all(row["sources"] and all(x.startswith("https://") for x in row["sources"]) for row in CROP_DATABASE)
+
+
+def test_xeoi_allows_explicit_preliminary_three_source_result_without_faking_modis_ecostress():
+    farm = {
+        "name": "Demo field", "location": "Gazipur, Bangladesh", "currentCrop": "Rice",
+        "history": "Rice, Wheat", "priority": "Save water", "water": "Limited",
+        "soilType": "Sandy Loam", "plantingMonth": "11", "lang": "bn",
+    }
+    nasa = {
+        "status": "live", "temperatureMeanC": 28.5, "rainfallChangePct": -18.0,
+        "smapRootZoneAnomalyPct": -12.0,
+        "observationCounts": {"powerDailyT2M": 1500, "smapRootZoneDaily": 1500, "gpmImergDaily": 600},
+    }
+    ancillary = {
+        "status": "partial",
+        "modis": {"status": "live", "observationCount": 3, "qualityObservationsAccepted": 3,
+                  "qualityColumnAvailable": True, "mean": 0.47, "trendChangePct": None},
+        "ecostress": {"status": "live", "observationCount": 30, "qualityObservationsAccepted": 30,
+                      "cloudMaskAvailable": True, "waterMaskAvailable": True,
+                      "mean": 1.62, "trendChangePct": -7.37},
+    }
+    result = _decision_engine(farm, nasa, ancillary, allow_partial=True)
+    assert result["status"] == "success"
+    assert result["decisionModeCode"] == "preliminary_three_source"
+    assert result["sourcesUsed"] == 3
+    assert result["fullFiveSourceEligible"] is False
+    assert result["observationCounts"]["MODIS"] == 3
+    assert result["observationCounts"]["ECOSTRESS"] == 30
+    assert result["indices"]["modisMeanNdvi"] is None
+    assert result["indices"]["ecostressMeanEtMmDay"] is None
+    assert not any("MODIS" in item["source"] or "ECOSTRESS" in item["source"] for item in result["evidence"])
+    assert "PRELIMINARY ONLY" in result["decisionNote"]
+    assert len(result["strategies"]) == 3
+    assert len(result["cropCandidates"]) > 0
+
+
+def test_xeoi_full_five_source_remains_blocked_unless_qa_thresholds_pass():
+    farm = {"location": "Gazipur, Bangladesh", "currentCrop": "Rice", "plantingMonth": "11"}
+    nasa = {
+        "status": "live", "temperatureMeanC": 28.5, "rainfallChangePct": -18.0,
+        "smapRootZoneAnomalyPct": -12.0,
+        "observationCounts": {"powerDailyT2M": 1500, "smapRootZoneDaily": 1500, "gpmImergDaily": 600},
+    }
+    ancillary = {
+        "status": "partial",
+        "modis": {"status": "live", "observationCount": 3, "qualityColumnAvailable": True, "trendChangePct": None},
+        "ecostress": {"status": "live", "observationCount": 30, "cloudMaskAvailable": True, "waterMaskAvailable": True, "trendChangePct": -7.37},
+    }
+    result = _decision_engine(farm, nasa, ancillary, allow_partial=False)
+    assert result["status"] == "blocked"
+    assert "MODIS" in " ".join(result["missingSources"])
+
+
+
+def test_rotation_request_accepts_explicit_preliminary_mode():
+    from main import RotationRequest
+    request = RotationRequest(farm={"currentCrop": "Rice"}, nasa={"status": "live"}, allowPartial=True)
+    assert request.allowPartial is True
+    assert request.ancillary == {}
+
+
+def test_claude_guidance_prompt_discloses_preliminary_sources(monkeypatch):
+    import json
+    from main import RotationRequest, _decision_engine, _generate_ai_rotation_guidance
+    from crop_intelligence import recommend_crop_candidates
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    farm = {"location": "Gazipur, Bangladesh", "currentCrop": "Rice", "plantingMonth": "11", "soilType": "Sandy Loam", "lang": "bn"}
+    nasa = {"status": "live", "temperatureMeanC": 28.5, "rainfallChangePct": -18.0, "smapRootZoneAnomalyPct": -12.0,
+            "observationCounts": {"powerDailyT2M": 100, "smapRootZoneDaily": 100, "gpmImergDaily": 100}}
+    ancillary = {"status": "partial", "modis": {"status": "live", "observationCount": 3, "qualityColumnAvailable": True},
+                 "ecostress": {"status": "live", "observationCount": 30, "cloudMaskAvailable": True, "waterMaskAvailable": True, "trendChangePct": -7.0}}
+    result = _decision_engine(farm, nasa, ancillary, allow_partial=True)
+    chosen = next(x for x in result["strategies"] if x.get("candidateCrop"))
+    expected = {"heading": "প্রাথমিক পরামর্শ", "recommendedPathwayId": chosen["id"],
+                "recommendedCrop": chosen["candidateCrop"]["cropBn"], "sequence": chosen["sequence"],
+                "why": "প্রাথমিকভাবে তিনটি NASA উৎস ও ফসল ক্যালেন্ডার ব্যবহার করা হয়েছে।",
+                "nextSteps": ["স্থানীয় মৌসুম যাচাই করুন", "বীজের জাত যাচাই করুন", "জমির পানি ও নিষ্কাশন দেখুন"],
+                "cautions": ["MODIS/ECOSTRESS এখনো স্কোরে ব্যবহৃত হয়নি", "স্থানীয় কৃষি কর্মকর্তার সঙ্গে মিলিয়ে নিন"],
+                "validationNote": "এটি প্রাথমিক ৩-source পরামর্শ; পূর্ণ পাঁচ-source XEOI নয়। BARC ও স্থানীয় কর্মকর্তার সঙ্গে যাচাই করুন।"}
+    class FakeResponse:
+        status_code = 200
+        def json(self):
+            return {"content": [{"type": "text", "text": json.dumps(expected, ensure_ascii=False)}]}
+    calls = {}
+    def fake_post(*args, **kwargs):
+        calls.update(kwargs)
+        return FakeResponse()
+    monkeypatch.setattr(main.requests, "post", fake_post)
+    request = RotationRequest(farm=farm, nasa=nasa, ancillary=ancillary, lang="bn", allowPartial=True)
+    output = _generate_ai_rotation_guidance(request, result)
+    assert output["recommendedPathwayId"] == chosen["id"]
+    assert "PRELIMINARY THREE-SOURCE" in calls["json"]["system"]

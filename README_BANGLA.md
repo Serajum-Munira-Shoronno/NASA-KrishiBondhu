@@ -67,7 +67,7 @@ Render Blueprint একটি public HTTPS API তৈরি করবে। `ren
 4. NASA tab-এ `Fetch POWER, SMAP & GPM` চাপুন।
 5. এরপর `Fetch MODIS + ECOSTRESS` চাপুন। App AppEEARS point-sampling task জমা দেবে এবং status poll করবে। 24-month sample কয়েক মিনিট নিতে পারে। App বন্ধ করবেন না।
 6. NASA tab-এ MODIS ও ECOSTRESS-এর accepted QA observation count দেখুন। অন্তত 8 MODIS এবং 4 ECOSTRESS accepted observations ও expected QA columns না থাকলে status `partial` হবে এবং AI decision ইচ্ছাকৃতভাবে blocked থাকবে।
-7. পাঁচটি source live এবং Anthropic API key active হলে পরামর্শ tab → `AI দিয়ে পরামর্শ তৈরি করুন` চাপুন। Claude crop candidate, sequence, next steps ও caution দেখাবে।
+7. পাঁচটি source-এর QA/count/trend শর্ত পূরণ হলে Advice tab-এ Full XEOI advice তৈরি হবে। শর্ত পূরণ না হলে `প্রাথমিক পরামর্শ তৈরি করুন (৩টি NASA উৎস)` ব্যবহার করা যায়: এটি শুধু POWER + SMAP + GPM, farmer inputs ও Bangladesh crop calendar ব্যবহার করে এবং ফলাফলকে preliminary হিসেবে চিহ্নিত করে। MODIS/ECOSTRESS এই mode-এর score-এ ব্যবহার হয় না। উভয় mode-এ Claude explanation-এর জন্য Anthropic API key দরকার।
 
 ### 4) Local backend (API testing only)
 
