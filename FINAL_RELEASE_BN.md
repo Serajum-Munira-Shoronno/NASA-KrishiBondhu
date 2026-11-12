@@ -64,7 +64,3 @@
 ## Tests
 
 `backend/` ফোল্ডারে `pytest -q` চালান। Backend tests NASA product catalogue resolution, MODIS/ECOSTRESS QA parsing, five-source gating, cached evidence, Claude output validation, crop calendar filtering, coastal-only crop screening, soil-unit checks এবং crop candidate structure যাচাই করে।
-
-
-## v1.3.5 video-preview note
-Satellite tab can show actual dated QA-accepted MODIS/ECOSTRESS series when returned by the backend. An optional DEMO/SAMPLE chart and example-advice preview are explicitly watermarked and are not sent to or used by the advice engine. For judge-facing claims, use only live task output and an actual API-generated recommendation.

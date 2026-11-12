@@ -1,16 +1,26 @@
-NASA KrishiBondhu v1.3.3 — Advice + MODIS QA Fix
+NASA KrishiBondhu v1.3.3 — Live Fix (Advice 409 + MODIS 7/8 + resume)
 
-সংশোধন:
-1. Advice Tab এখন POWER + SMAP + GPM live/cached থাকলে Preliminary Advice তৈরি করতে পারে; MODIS/ECOSTRESS partial status আর প্রাথমিক পরামর্শ block করে না।
-2. Android native bridge `allowPartial` flag backend `/api/decision/rotation`-এ পাঠায়।
-3. Preliminary result ৩টি NASA source ব্যবহার করেছে বলে দেখায় এবং MODIS/ECOSTRESS-এর অসম্পূর্ণ মান score-এ নেয় না।
-4. Full advice-এর শর্ত অপরিবর্তিত: MODIS >= 8, ECOSTRESS >= 4 এবং প্রয়োজনীয় QA fields ও usable trends।
-5. MODIS AppEEARS request-এ NDVI, pixel reliability এবং DetailedQA একসঙ্গে চাওয়া হয়। Summary reliability class 1 হলে DetailedQA-তে VI usefulness 0/1, land-pixel mask এবং cloud/snow/shadow flag যাচাই করা হয়।
-6. AppEEARS sampling window Android থেকে ৩৬ মাসে উন্নীত করা হয়েছে।
-7. NASA tab partial data লুকায় না; accepted বনাম checked count দেখায়।
-8. Preliminary result app restart-এর পরও local storage-এ রাখা যায়।
+ঠিক করা হয়েছে
+1. SMAP: POWER শেষের দিনগুলোতে -999 (fill) দেয়। আগে app শেষ key ধরত, ফলে "SMAP anomaly" null হয়ে Advice 409 blocked হতো।
+   এখন সর্বশেষ *valid* তারিখ ধরা হয় এবং observation count শুধু valid মান গোনে। (Java: latestValidKey / validCount)
+2. পুরোনো NASA snapshot (fetchVersion != 2) app খুললে বাতিল হয়; "উপগ্রহ" ট্যাবে NASA তথ্য একবার আবার আনতে হবে।
+3. MODIS 7/8: pixel_reliability 0 (good) এবং 1 (marginal) গ্রহণযোগ্য; 2 (snow/ice), 3 (cloud), -1 (fill) বাদ।
+   *_Description টেক্সট কলাম আর ভুলে QA কলাম হিসেবে ধরা হয় না।
+4. AppEEARS resume: taskId ফোনে সংরক্ষিত থাকে। "উপগ্রহ তথ্য আনুন" চাপলে আগের partial টাস্কের ফল আবার summarise হয় (নতুন টাস্কের অপেক্ষা নেই)।
+   Polling ১৫০ বার (~২০ মিনিট); Render/নেটওয়ার্কের ছোট error এ আর থামে না।
+5. Backend restart/Render Free এ SQLite হারালেও task AppEEARS থেকে পুনরুদ্ধার হয় (_rebuild_task_meta)। পুরোনো cached summary (summaryVersion<2) নতুন নিয়মে আবার হিসাব হয়।
+6. Claude: max_tokens 850 -> 3200 (বাংলা JSON কেটে যেত), তালিকা বেশি এলে ছাঁটা হয়, API error এর কারণ দেখায়। Chat 600 -> 1400।
+7. Advice error আর ৫ সেকেন্ডের কাটা toast নয়: Advice ট্যাবে স্থায়ী ⚠️ বক্স, missingSources সহ।
+8. Backend "/" এখন {"status":"ok"} দেয়।
 
-সীমাবদ্ধতা:
-- Marginal observation কেবল অতিরিক্ত DetailedQA শর্ত পাস করলে accepted; QA evidence না থাকলে বাদ থাকবে।
-- এই patch live NASA AppEEARS task চালায় না; deploy করার পর নতুন ৩৬-মাসের task চালাতে হবে।
-- Android APK build, live Render deploy এবং live farm-coordinate verification আলাদাভাবে করতে হবে।
+Deploy
+- backend/ এর main.py git push করুন -> Render auto deploy (Logs এ "Application startup complete" দেখুন)।
+- APK নতুন করে build করে install করুন (versionCode 7)।
+
+Screen-record এর আগে (Render Free ১৫ মিনিট idle থাকলে ঘুমায়)
+- রেকর্ডিংয়ের ১-২ মিনিট আগে ব্রাউজারে <your-backend>/health খুলুন।
+- ক্রম: My Farm (coordinates) -> উপগ্রহ ট্যাব "NASA তথ্য আনুন" -> "উপগ্রহ তথ্য আনুন" (MODIS/ECOSTRESS) -> পরামর্শ ট্যাব।
+- MODIS/ECOSTRESS পুরো না এলেও "প্রাথমিক পরামর্শ" (৩-source) চলবে; পুরো হলে ৫-source।
+
+সীমাবদ্ধতা
+- এই patch আমি live NASA/Render এর বিরুদ্ধে চালাতে পারিনি; Java কম্পাইলও করা হয়নি (JS syntax ও Python logic আলাদাভাবে যাচাই করা)।

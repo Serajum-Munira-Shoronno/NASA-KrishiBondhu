@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import calendar
 import csv
 import io
 import math
@@ -245,15 +244,14 @@ def _resolve_products(token: str) -> Dict[str, Any]:
     eco_layers = _layer_map(ecostress_id, token)
 
     ndvi = _choose_layer(modis_layers, ["ndvi"], ["evi"])
-    # Request the summary pixel-reliability layer AND DetailedQA when both exist.
-    # SummaryQA class 1 is only accepted after DetailedQA confirms a usable land pixel.
-    pixel_reliability = (
+    # Prefer the simple pixel-reliability/SummaryQA classes. DetailedQA is a bit field
+    # and is decoded separately below; it must never be treated as a direct 0/1 flag.
+    reliability = (
         _choose_layer(modis_layers, ["pixel", "reliability"])
         or _choose_layer(modis_layers, ["reliability"])
         or _choose_layer(modis_layers, ["summaryqa"])
+        or _choose_layer(modis_layers, ["detailedqa"])
     )
-    detailed_qa = _choose_layer(modis_layers, ["detailedqa"])
-    reliability = pixel_reliability or detailed_qa
     et_daily = _choose_layer(ecostress_layers := eco_layers, ["etdaily"])
     et_uncertainty = _choose_layer(ecostress_layers, ["etuncertainty"])
     cloud = _choose_layer(ecostress_layers, ["cloud"])
@@ -274,8 +272,6 @@ def _resolve_products(token: str) -> Dict[str, Any]:
     ]
     if reliability:
         selected.append({"product": modis_id, "layer": reliability})
-    if detailed_qa and detailed_qa != reliability:
-        selected.append({"product": modis_id, "layer": detailed_qa})
     if et_uncertainty:
         selected.append({"product": ecostress_id, "layer": et_uncertainty})
     if cloud:
@@ -287,8 +283,6 @@ def _resolve_products(token: str) -> Dict[str, Any]:
         "modisProduct": modis_id,
         "modisNdviLayer": ndvi,
         "modisQualityLayer": reliability,
-        "modisPixelReliabilityLayer": pixel_reliability,
-        "modisDetailedQaLayer": detailed_qa,
         "ecostressProduct": ecostress_id,
         "ecostressEtLayer": et_daily,
         "ecostressUncertaintyLayer": et_uncertainty,
@@ -296,29 +290,6 @@ def _resolve_products(token: str) -> Dict[str, Any]:
         "ecostressWaterLayer": water,
         "requestLayers": selected,
     }
-
-
-def _subtract_calendar_months(day: date, months: int) -> date:
-    """Subtract exact calendar months, clamping to the destination month's last day."""
-    month_index = day.year * 12 + (day.month - 1) - months
-    year, month_zero = divmod(month_index, 12)
-    month = month_zero + 1
-    return date(year, month, min(day.day, calendar.monthrange(year, month)[1]))
-
-
-def _scale_modis_ndvi(value: Optional[float]) -> Optional[float]:
-    """Validate MOD13Q1 NDVI raw/scaled range and apply its 0.0001 scale once."""
-    if value is None:
-        return None
-    if abs(value) > 1.5:
-        # MOD13Q1 raw NDVI valid range is -2000..10000; -3000 and other fill
-        # codes must not become plausible NDVI values after scaling.
-        if not (-2000 <= value <= 10000) or abs(value - round(value)) > 1e-6:
-            return None
-        scaled = value * 0.0001
-    else:
-        scaled = value
-    return scaled if -0.2 <= scaled <= 1.0 else None
 
 
 def _parse_float(value: Any) -> Optional[float]:
@@ -354,36 +325,7 @@ def _trend_percent(values: List[float]) -> Optional[float]:
     return ((second - first) / abs(first)) * 100.0
 
 
-def _detailed_qa_is_acceptable(value: Optional[float]) -> bool:
-    """Accept MOD13Q1 DetailedQA only when it indicates a usable land pixel.
-
-    Bits 0-1: MODLAND quality (0=good, 1=check other QA); bits 2-5:
-    VI usefulness (0/1 are highest/lower quality). Reject adjacency cloud,
-    mixed cloud, non-land, snow/ice and shadow flags for farm-point screening.
-    """
-    if value is None:
-        return False
-    if abs(value - round(value)) > 1e-6:
-        return False
-    q = int(value)
-    if q < 0 or q > 65535:
-        return False
-    modland_qa = q & 0b11
-    usefulness = (q >> 2) & 0b1111
-    adjacent_cloud = (q >> 8) & 1
-    mixed_cloud = (q >> 10) & 1
-    land_water = (q >> 11) & 0b111
-    snow_ice = (q >> 14) & 1
-    shadow = (q >> 15) & 1
-    return (
-        modland_qa in (0, 1)
-        and usefulness <= 1
-        and adjacent_cloud == 0
-        and mixed_cloud == 0
-        and land_water == 1
-        and snow_ice == 0
-        and shadow == 0
-    )
+SUMMARY_VERSION = 2
 
 
 def _summarize_csv(csv_texts: List[str], products: Dict[str, Any]) -> Dict[str, Any]:
@@ -391,8 +333,6 @@ def _summarize_csv(csv_texts: List[str], products: Dict[str, Any]) -> Dict[str, 
     eco_values: List[Tuple[str, float, Optional[float]]] = []
     modis_quality_seen = 0
     modis_quality_good = 0
-    modis_marginal_accepted = 0
-    modis_detailedqa_rejected = 0
     eco_quality_seen = 0
     eco_quality_good = 0
     modis_quality_column_found = False
@@ -406,54 +346,42 @@ def _summarize_csv(csv_texts: List[str], products: Dict[str, Any]) -> Dict[str, 
                 continue
             headers = [str(x or "") for x in reader.fieldnames]
             ndvi_col = _find_column(headers, ["ndvi"], ["evi"])
-            reliability_col = (_find_column(headers, ["pixel", "reliability"]) or _find_column(headers, ["reliability"]) or _find_column(headers, ["summaryqa"]))
-            detailedqa_col = _find_column(headers, ["detailedqa"])
-            # When DetailedQA is the only quality layer, use it as the primary QA field.
-            if reliability_col is None:
-                reliability_col = detailedqa_col
+            reliability_col = (_find_column(headers, ["pixel", "reliability"], ["description"]) or _find_column(headers, ["reliability"], ["description"]) or _find_column(headers, ["summaryqa"], ["description"]) or _find_column(headers, ["detailedqa"], ["description"]))
             et_col = _find_column(headers, ["etdaily"])
             uncertainty_col = _find_column(headers, ["etuncertainty"])
-            cloud_col = _find_column(headers, ["cloud"])
-            water_col = _find_column(headers, ["water"])
-            modis_quality_column_found = modis_quality_column_found or bool(reliability_col or detailedqa_col)
+            cloud_col = _find_column(headers, ["cloud"], ["description"])
+            water_col = _find_column(headers, ["water"], ["description"])
+            modis_quality_column_found = modis_quality_column_found or bool(reliability_col)
             eco_cloud_column_found = eco_cloud_column_found or bool(cloud_col)
             eco_water_column_found = eco_water_column_found or bool(water_col)
             date_col = _find_column(headers, ["date"]) or _find_column(headers, ["time"])
             for row in reader:
                 date_value = str(row.get(date_col, "") if date_col else "")
                 if ndvi_col:
-                    raw_value = _parse_float(row.get(ndvi_col))
-                    value = _scale_modis_ndvi(raw_value)
+                    value = _parse_float(row.get(ndvi_col))
                     if value is not None:
                         modis_quality_seen += 1
                         quality = _parse_float(row.get(reliability_col)) if reliability_col else None
-                        if not reliability_col or quality is None or abs(quality - round(quality)) > 1e-6:
+                        # MOD13Q1 quality semantics depend on the selected layer:
+                        # pixel_reliability / SummaryQA: 0=good, 1=marginal, 2=snow/ice, 3=cloudy.
+                        # DetailedQA: bits 0-1 are MODLAND QA; bits 2-5 are VI usefulness.
+                        if not reliability_col or quality is None:
                             continue
                         qname = reliability_col.lower()
                         q = int(quality)
-                        detailed_value = _parse_float(row.get(detailedqa_col)) if detailedqa_col else None
-                        accepted = False
-                        marginal_accepted_candidate = False
                         if "detailedqa" in qname:
-                            accepted = _detailed_qa_is_acceptable(quality)
-                        elif q == 0:
-                            # Summary/pixel reliability 0 means good data.
-                            accepted = True
-                        elif q == 1 and detailedqa_col and detailed_value is not None:
-                            # Marginal summary pixels are rescued only when DetailedQA
-                            # independently confirms good usefulness and clear land.
-                            accepted = _detailed_qa_is_acceptable(detailed_value)
-                            marginal_accepted_candidate = accepted
-                            if not accepted:
-                                modis_detailedqa_rejected += 1
-                        # Classes 2/3 and all unverified marginal/invalid pixels are rejected.
-                        if not accepted:
+                            modland_qa = q & 0b11
+                            usefulness = (q >> 2) & 0b1111
+                            if modland_qa != 0 or usefulness > 1:
+                                continue
+                        elif q not in (0, 1):
+                            # 0 = good, 1 = marginal (both usable); 2 = snow/ice, 3 = cloudy, -1 = fill are rejected.
                             continue
-                        # value is already range-checked and scaled by _scale_modis_ndvi.
-                        if -0.2 <= value <= 1.0:
-                            modis_quality_good += 1
-                            if marginal_accepted_candidate:
-                                modis_marginal_accepted += 1
+                        modis_quality_good += 1
+                        # MOD13Q1 NDVI uses a 0.0001 scale factor when raw integer DN values are returned.
+                        if abs(value) > 1.5:
+                            value *= 0.0001
+                        if -1.0 <= value <= 1.0:
                             modis_values.append((date_value, value))
                 if et_col:
                     value = _parse_float(row.get(et_col))
@@ -488,9 +416,6 @@ def _summarize_csv(csv_texts: List[str], products: Dict[str, Any]) -> Dict[str, 
             "median": round(statistics.median(vals), 5) if vals else None,
             "trendChangePct": round(_trend_percent(vals), 2) if _trend_percent(vals) is not None else None,
             "unit": unit,
-            # Return only QA-accepted observation dates/values for honest client-side plots.
-            # The Android UI never interpolates missing days or fabricates points.
-            "series": [{"date": str(d), "value": round(float(v), 5)} for d, v in pairs[-120:]],
         }
 
     ndvi = metric_summary(modis_values, "unitless NDVI")
@@ -498,17 +423,15 @@ def _summarize_csv(csv_texts: List[str], products: Dict[str, Any]) -> Dict[str, 
     uncertainty_values = [u for _, _, u in eco_values if u is not None]
     et["meanUncertaintyMmDay"] = round(statistics.mean(uncertainty_values), 5) if uncertainty_values else None
     return {
+        "summaryVersion": SUMMARY_VERSION,
         "status": "live" if ndvi["observationCount"] >= 8 and et["observationCount"] >= 4 and modis_quality_column_found and eco_cloud_column_found and eco_water_column_found else "partial",
         "modis": {
             **ndvi,
             "product": products["modisProduct"],
             "layer": products["modisNdviLayer"],
             "qualityLayer": products["modisQualityLayer"],
-            "detailedQaLayer": products.get("modisDetailedQaLayer"),
             "qualityObservationsSeen": modis_quality_seen,
             "qualityObservationsAccepted": modis_quality_good,
-            "marginalAcceptedWithDetailedQA": modis_marginal_accepted,
-            "marginalRejectedByDetailedQA": modis_detailedqa_rejected,
             "qualityColumnAvailable": modis_quality_column_found,
             "spatialResolutionM": 250,
             "temporalResolutionDays": 16,
@@ -534,7 +457,7 @@ def _summarize_csv(csv_texts: List[str], products: Dict[str, Any]) -> Dict[str, 
             "NASA/JPL/LP DAAC ECOSTRESS L3 JET (ETdaily; 70 m; irregular overpass observations)",
         ],
         "qualityNotes": [
-            "MODIS NDVI raw values are range-checked against -2000..10000 before applying the documented 0.0001 scale factor; fill values are excluded. Pixel-reliability class 0 is accepted; class 1 is accepted only when DetailedQA confirms VI usefulness 0/1, a land pixel, and no adjacent cloud, mixed cloud, snow/ice or shadow. Classes 2/3 and unverified marginal pixels are rejected.",
+            "MODIS NDVI applies the documented 0.0001 scale factor when raw integer values are supplied; pixel-reliability classes 0 (good) and 1 (marginal) are accepted; class 2 (snow/ice), class 3 (cloudy) and fill values are rejected when the quality layer is available.",
             "ECOSTRESS ETdaily is reported in mm/day for the daytime-integrated observation; cloudy and water pixels are excluded when those masks are included in the AppEEARS response.",
             "ECOSTRESS has irregular ISS overpasses and data gaps. A missing overpass is not interpreted as zero evapotranspiration.",
             "The advanced sample is marked live only if MODIS quality and ECOSTRESS cloud and water quality columns are present and non-zero valid observations remain after screening.",
@@ -568,6 +491,11 @@ def _download_result_csvs(task_id: str, token: str) -> List[str]:
     return csvs
 
 
+@app.get("/")
+def root() -> Dict[str, Any]:
+    return {"service": "NASA KrishiBondhu backend", "status": "ok", "health": "/health"}
+
+
 @app.get("/health")
 def health() -> Dict[str, Any]:
     return {
@@ -595,8 +523,6 @@ def verify_appeears_configuration() -> Dict[str, Any]:
             "product": products["modisProduct"],
             "ndviLayer": products["modisNdviLayer"],
             "qualityLayer": products["modisQualityLayer"],
-            "pixelReliabilityLayer": products.get("modisPixelReliabilityLayer"),
-            "detailedQaLayer": products.get("modisDetailedQaLayer"),
         },
         "ecostress": {
             "product": products["ecostressProduct"],
@@ -615,7 +541,7 @@ def submit_appeears_point(request: PointSampleRequest) -> Dict[str, Any]:
     products = _resolve_products(token)
     today = date.today()
     end_date = today - timedelta(days=10)  # allow recent composites to complete
-    start_date = _subtract_calendar_months(end_date, request.months)
+    start_date = end_date - timedelta(days=30 * request.months)
     task_name = f"KrishiBondhu-{uuid.uuid4().hex[:10]}"
     task_payload = {
         "task_type": "point",
@@ -651,16 +577,45 @@ def submit_appeears_point(request: PointSampleRequest) -> Dict[str, Any]:
     }
 
 
+def _rebuild_task_meta(task_id: str, token: str, status_obj: Dict[str, Any]) -> Dict[str, Any]:
+    """Recover task metadata from AppEEARS itself when the local SQLite store was lost (e.g. Render free tier)."""
+    params = status_obj.get("params") if isinstance(status_obj, dict) else None
+    coords = (params or {}).get("coordinates") or []
+    if not coords:
+        raise HTTPException(status_code=404, detail="Task is unknown to this backend and could not be recovered from AppEEARS. Submit a new sample request.")
+    first = coords[0]
+    dates = ((params or {}).get("dates") or [{}])[0]
+    products = _resolve_products(token)
+    for layer in (params or {}).get("layers") or []:
+        prod = str(layer.get("product", "")) if isinstance(layer, dict) else ""
+        if prod.startswith("MOD13Q1"):
+            products["modisProduct"] = prod
+        elif prod.startswith("ECO_L3T_JET"):
+            products["ecostressProduct"] = prod
+    return {
+        "products": products,
+        "latitude": float(first.get("latitude")),
+        "longitude": float(first.get("longitude")),
+        "startDate": str(dates.get("startDate", "")),
+        "endDate": str(dates.get("endDate", "")),
+        "submittedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "recoveredFromAppeears": True,
+    }
+
+
 @app.get("/api/nasa/appeears/point/{task_id}")
 def appeears_point_status(task_id: str) -> Dict[str, Any]:
+    if not re.fullmatch(r"[0-9A-Za-z-]{8,64}", task_id):
+        raise HTTPException(status_code=400, detail="Invalid AppEEARS task id.")
     cached = _load_result(task_id)
-    meta = _load_task(task_id)
-    if cached:
+    if cached and cached.get("summaryVersion") == SUMMARY_VERSION:
         return cached
-    if not meta:
-        raise HTTPException(status_code=404, detail="Task is unknown to this backend persistent store. Submit a new sample request.")
+    meta = _load_task(task_id)
     token = _appeears_login()
     status_obj = _api_get(f"task/{task_id}", token)
+    if not meta:
+        meta = _rebuild_task_meta(task_id, token, status_obj)
+        _persist_task(task_id, meta)
     status = str(status_obj.get("status", "unknown")).lower()
     if status not in {"done", "error", "failed", "cancelled", "cancelled_by_user"}:
         return {"status": status, "taskId": task_id, "message": "NASA AppEEARS is still processing this point sample."}
@@ -960,20 +915,24 @@ def _generate_ai_rotation_guidance(request: RotationRequest, result: Dict[str, A
         "Keep sentences short and practical for a farmer. Return ONLY valid JSON with exactly these keys: "
         "heading (string), recommendedPathwayId (string), recommendedCrop (string), sequence (array of 2-4 strings), "
         "why (string), nextSteps (array of 3-5 strings), cautions (array of 2-4 strings), validationNote (string). "
-        "No markdown fences, no extra keys, no invented live measurements."
+        "Keep every string under 230 characters. No markdown fences, no extra keys, no invented live measurements."
     )
     try:
         resp = requests.post(
             "https://api.anthropic.com/v1/messages",
             headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-            json={"model": CHAT_MODEL, "max_tokens": 850, "system": system,
+            json={"model": CHAT_MODEL, "max_tokens": 3200, "system": system,
                   "messages": [{"role": "user", "content": "Create a practical crop-rotation recommendation from this verified evidence JSON:\n" + __import__("json").dumps(payload, ensure_ascii=False)}]},
-            timeout=(10, 75),
+            timeout=(10, 100),
         )
     except requests.RequestException as exc:
         raise HTTPException(status_code=502, detail=f"Claude AI service unreachable: {exc.__class__.__name__}.")
     if resp.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"Claude AI service error (HTTP {resp.status_code}). Check the model ID and API account credits.")
+        try:
+            api_msg = (resp.json().get("error") or {}).get("message", "")[:160]
+        except Exception:
+            api_msg = ""
+        raise HTTPException(status_code=502, detail=f"Claude AI service error (HTTP {resp.status_code}): {api_msg} Check ANTHROPIC_API_KEY, CLAUDE_MODEL and API credits.")
     blocks = resp.json().get("content", [])
     answer = "\n".join(b.get("text", "") for b in blocks if b.get("type") == "text").strip()
     answer = re.sub(r"^```(?:json)?\s*|\s*```$", "", answer, flags=re.I)
@@ -1005,7 +964,9 @@ def _generate_ai_rotation_guidance(request: RotationRequest, result: Dict[str, A
         raise HTTPException(status_code=502, detail="Claude returned an incomplete crop recommendation.")
     for key_name, minimum, maximum in (("sequence", 2, 4), ("nextSteps", 3, 5), ("cautions", 2, 4)):
         items = guidance.get(key_name)
-        if not isinstance(items, list) or not minimum <= len(items) <= maximum or any(not isinstance(x, str) or not x.strip() for x in items):
+        if isinstance(items, list):
+            items = [x for x in items if isinstance(x, str) and x.strip()][:maximum]
+        if not isinstance(items, list) or len(items) < minimum:
             raise HTTPException(status_code=502, detail=f"Claude returned invalid {key_name} guidance.")
         guidance[key_name] = [x.strip()[:280] for x in items]
     for key_name in required_strings:
@@ -1128,7 +1089,7 @@ def ai_chat(request: ChatRequest, http_request: Request) -> Dict[str, Any]:
         resp = requests.post(
             "https://api.anthropic.com/v1/messages",
             headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-            json={"model": CHAT_MODEL, "max_tokens": 600, "system": _chat_system_prompt(request), "messages": history},
+            json={"model": CHAT_MODEL, "max_tokens": 1400, "system": _chat_system_prompt(request), "messages": history},
             timeout=(10, 60),
         )
     except requests.RequestException as exc:
