@@ -358,7 +358,7 @@ def recommend_crop_candidates(farm: Dict[str, Any], nasa: Dict[str, Any], ancill
         "excludedRegionalCandidates": excluded,
         "soilTestScreen": soil_flags,
         "waterStressContext": round(water_stress * 100, 1),
-        "scoringWeights": "calendar, soil suitability, water fit (NASA rainfall + SMAP; ECOSTRESS only jointly with MODIS decline), crop-family rotation and unit-checked soil-test screening; normalized relative screening score only",
+        "scoringWeights": "calendar, soil suitability, water fit (NASA rainfall + MERRA-2 soil moisture; ECOSTRESS only jointly with MODIS decline), crop-family rotation and unit-checked soil-test screening; normalized relative screening score only",
         "barcSuitability": {"status": "not_checked_live", "url": BARC_SUITABILITY_URL,
                             "note": "Select district, upazila, season and crop in BARC Crop Suitability before planting. This app's regional screening is not a BARC suitability rating."},
         "validationRequired": True,

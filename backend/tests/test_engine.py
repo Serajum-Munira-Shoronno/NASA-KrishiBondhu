@@ -410,3 +410,50 @@ def test_modis_marginal_pixels_are_accepted_but_cloud_snow_fill_are_not():
     assert result["modis"]["qualityObservationsSeen"] == 8
     assert result["modis"]["qualityObservationsAccepted"] == 5
     assert result["summaryVersion"] == 2
+
+
+def _preliminary_result_and_request():
+    farm = {"name": "T", "location": "Tangail", "plantingMonth": "11", "currentCrop": "Rice", "soilType": "Clay loam",
+            "water": "Medium", "priority": "Improve soil health", "history": "Rice, Wheat", "lang": "bn"}
+    nasa = {"status": "live", "temperatureMeanC": 26.4, "rainfallChangePct": -9.5, "smapRootZoneAnomalyPct": -7.2,
+            "observationCounts": {"powerDailyT2M": 1820, "smapRootZoneDaily": 1790, "gpmImergDaily": 730}}
+    result = main._decision_engine(farm, nasa, {}, allow_partial=True)
+    request = main.RotationRequest(farm=farm, nasa=nasa, allowPartial=True, lang="bn")
+    return request, result
+
+
+def test_claude_failure_falls_back_to_labelled_rule_based_guidance(monkeypatch):
+    request, result = _preliminary_result_and_request()
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+
+    class Resp:
+        status_code = 401
+
+        def json(self):
+            return {"error": {"message": "invalid x-api-key"}}
+
+    monkeypatch.setattr(main.requests, "post", lambda *a, **k: Resp())
+    guidance = main._generate_ai_rotation_guidance(request, result)
+    assert guidance["source"] == "rules"
+    assert 3 <= len(guidance["nextSteps"]) <= 5 and 2 <= len(guidance["cautions"]) <= 4
+    assert guidance["recommendedPathwayId"] in {"soil", "water"}
+
+
+def test_claude_wrong_pathway_id_is_corrected_not_rejected(monkeypatch):
+    import json as _json
+    request, result = _preliminary_result_and_request()
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    answer = {"heading": "h", "recommendedPathwayId": "banana", "recommendedCrop": "x", "sequence": ["a", "b"], "why": "w",
+              "nextSteps": ["1", "2", "3", "4", "5", "6"], "cautions": ["c1", "c2"], "validationNote": "n"}
+
+    class Resp:
+        status_code = 200
+
+        def json(self):
+            return {"content": [{"type": "text", "text": _json.dumps(answer)}]}
+
+    monkeypatch.setattr(main.requests, "post", lambda *a, **k: Resp())
+    guidance = main._generate_ai_rotation_guidance(request, result)
+    assert guidance["source"] == "claude"
+    assert guidance["recommendedPathwayId"] in {"soil", "water"}
+    assert len(guidance["nextSteps"]) == 5
